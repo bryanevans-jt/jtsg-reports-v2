@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Joshua Tree Reports</title>
+    <link rel="manifest" href="./manifest.json">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f9fafb;
+        }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 0.5rem 1rem;
+        }
+        /* Custom style for file input */
+        .file-input-button {
+            cursor: pointer;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            background-color: #166534; /* green-800 */
+            color: white;
+            font-weight: 600;
+            transition: background-color 0.3s;
+        }
+        .file-input-button:hover {
+            background-color: #15803d; /* green-700 */
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <div id="message-container" class="fixed top-4 right-4 z-50"></div>
+
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-functions.js"></script>
+    
+    <script>
+        // --- CONFIGURATION ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyCC8pfxd7A55hN40P9fN5XNXmUHx6_LymQ",
+            authDomain: "joshua-tree-reports-app.firebaseapp.com",
+            projectId: "joshua-tree-reports-app",
+            storageBucket: "joshua-tree-reports-app.appspot.com",
+            messagingSenderId: "1094496083524",
+            appId: "1:1094496083524:web:51ad01797bcf34546d2611",
+            measurementId: "G-Y9XTDBS1LW"
+        };
+        
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+        const functions = firebase.functions();
+
+        // --- STATE MANAGEMENT ---
+        const screens = { LOGIN: 'LOGIN', REPORT_SELECTION: 'REPORT_SELECTION', BASIC_INFO: 'BASIC_INFO', REPORT_FORM: 'REPORT_FORM', VPR_FORM: 'VPR_FORM', JTSG_VMR_FORM: 'JTSG_VMR_FORM', JTSG_TSVS_FORM: 'JTSG_TSVS_FORM', EVF_FORM: 'EVF_FORM', REVIEW_AND_SIGN: 'REVIEW_AND_SIGN', JTSG_VMR_REVIEW: 'JTSG_VMR_REVIEW', SUBMISSION_STATUS: 'SUBMISSION_STATUS' };
+        let state = { user: null, screen: screens.LOGIN, reportType: '', esName: '', clientName: '', loading: false, message: '', reportData: {}, typedEsName: '', signatureData: '', };
+        const reportCollectionName = 'monthly_se_reports';
+        const jobCollectionName = 'report_jobs'; 
+
+        // --- HELPER FUNCTIONS ---
+        const generateClientId = (clientName) => clientName ? clientName.toLowerCase().replace(/\s/g, '') : null;
+        
+        const showMessage = (msg, isError = false) => {
+            const container = document.getElementById('message-container');
+            if (!container) return;
+            const messageEl = document.createElement('div');
+            messageEl.className = `p-4 rounded-lg shadow-md mb-2 text-white ${isError ? 'bg-red-500' : 'bg-green-500'}`;
+            messageEl.textContent = msg;
+            container.appendChild(messageEl);
+            setTimeout(() => { container.removeChild(messageEl); }, 5000);
+        };
+
+        // --- RENDER FUNCTION ---
+        const render = () => {
+            const root = document.getElementById('root');
+            root.innerHTML = ''; 
+            let content = '';
+
+            if (state.loading) {
+                content = `<div class="flex items-center justify-center min-h-screen"><div class="animate-spin rounded-full h-32 w-32 border-b-2 border-green-700"></div></div>`;
+                root.innerHTML = content;
+                return;
+            }
+
+            switch (state.screen) {
+                 case screens.LOGIN:
+                    content = `
+                        <div class="flex flex-col items-center justify-center min-h-screen bg-gray-50 p-4">
+                            <div class="bg-white p-8 rounded-2xl shadow-lg w-full max-w-sm text-center">
+                                <h1 class="text-3xl font-bold mb-4 text-green-800">Joshua Tree Reports</h1>
+                                <p class="text-gray-600 mb-6">Welcome! Please sign in with your organizational Google account to get started.</p>
+                                <button id="google-sign-in" class="w-full py-3 px-4 bg-green-700 text-white font-semibold rounded-lg shadow-md hover:bg-green-600 transition duration-300">Sign In with Google</button>
+                            </div>
+                        </div>`;
+                    break;
+                case screens.REPORT_SELECTION:
+                     content = `
+                        <div class="flex flex-col items-center min-h-screen bg-gray-50 p-4">
+                            <div class="bg-white p-8 rounded-2xl shadow-lg w-full max-w-lg mt-10">
+                                <h1 class="text-3xl font-bold mb-4 text-center text-green-800">Joshua Tree Reports</h1>
+                                <p class="text-gray-600 mb-6 text-center">Welcome, ${state.user.displayName}! Use this tool to submit client reports.</p>
+                                <div class="flex flex-col mb-4">
+                                    <label for="reportType" class="text-gray-700 font-semibold mb-2">Report Type</label>
+                                    <select id="reportType" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500">
+                                        <option value="">Select a report...</option>
+                                        <option value="seMonthly">SE Monthly Reports</option>
+                                        <option value="vpr">Vocational Progress Reports</option>
+                                        <option value="jtsgvmr">JTSG Vocational Monthly Reports</option>
+                                        <option value="jtsgtsvs" disabled>JTSG Time Sheet for Vocational Services (Under Maintenance)</option>
+                                        <option value="evf">Employment Verification Form</option>
+                                    </select>
+                                </div>
+                                <button id="next-button" class="w-full py-3 px-4 bg-green-700 text-white font-semibold rounded-lg shadow-md hover:bg-green-600 transition duration-300">Next</button>
+                            </div>
+                            <button id="sign-out" class="mt-6 text-sm text-gray-500 hover:text-red-500 transition duration-300">Sign Out</button>
+                        </div>`;
+                    break;
+                case screens.JTSG_TSVS_FORM:
+                    content = `
+                        <div class="flex flex-col items-center min-h-screen bg-gray-50 p-4">
+                            <div class="bg-white p-8 rounded-2xl shadow-lg w-full max-w-2xl mt-10 text-center">
+                                <h1 class="text-3xl font-bold mb-4 text-green-800">JTSG Time Sheet Submission</h1>
+                                <p class="text-gray-600 mb-6">Submit your JTSG Time Sheet for Vocational Services below. You may attach more than one time sheet.</p>
+                                <a href="https://drive.google.com/uc?export=download&id=1M_ShNpk7HgLAtehKohUxB5SzqTwoOSdi" target="_blank" class="inline-block py-3 px-6 mb-8 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-500 transition duration-300">Download Time Sheet Template</a>
+                                <div class="w-full p-6 border-2 border-dashed border-gray-300 rounded-lg">
+                                    <label for="jtsgtsvs-files" class="file-input-button">Choose Files (up to 10)</label>
+                                    <input type="file" id="jtsgtsvs-files" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.jpeg,.jpg,.png" class="hidden">
+                                    <div id="file-list" class="mt-4 text-left text-sm text-gray-600"></div>
+                                </div>
+                                <button id="submit-jtsgtsvs-button" class="w-full mt-8 py-3 px-4 bg-green-700 text-white font-semibold rounded-lg shadow-md hover:bg-green-600 transition duration-300">Submit</button>
+                            </div>
+                        </div>`;
+                    break;
+                case screens.BASIC_INFO:
+                     content = `
+                        <div class="flex flex-col items-center min-h-screen bg-gray-50 p-4">
+                            <div class="bg-white p-8 rounded-2xl shadow-lg w-full max-w-lg mt-10">
+                                <h1 class="text-2xl font-bold mb-4 text-center text-green-800">Client Information</h1>
+                                <p class="text-gray-600 mb-6 text-center">Please enter the client's information to continue.</p>
+                                <div class="flex flex-col gap-4">
+                                    <input type="text" id="esName" placeholder="Employment Specialist Name" value="${state.esName}" class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100" readonly />
+                                    <input type="text" id="clientName" placeholder="Client Name" value="${state.clientName}" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500" />
+                                </div>
+                                <button id="continue-button" class="w-full mt-6 py-3 px-4 bg-green-700 text-white font-semibold rounded-lg shadow-md hover:bg-green-600 transition duration-300">Continue</button>
+                            </div>
+                        </div>`;
+                    break;
+                case screens.VPR_FORM:
+                    content = `
+                        <div class="flex flex-col items-center min-h-screen bg-gray-50 p-4">
+                            <div class="bg-white p-8 rounded-2xl shadow-lg w-full max-w-2xl mt-10">
+                                <h1 class="text-3xl font-bold mb-6 text-center text-green-800">Vocational Progress Report</h1>
+                                <form id="vpr-form" class="space-y-6">
+                                    <div><label for="vpr-date" class="block text-gray-700 font-semibold mb-1">Date</label><input type="date" id="vpr-date" name="Date" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required/></div>
+                                    <div><label for="vpr-client-name" class="block text-gray-700 font-semibold mb-1">Client Name</label><input type="text" id="vpr-client-name" name="ClientName" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required/></div>
+                                     <div>
+                                        <label for="vpr-service-stage" class="block text-gray-700 font-semibold mb-1">Service Stage</label>
+                                        <select id="vpr-service-stage" name="ServiceStage" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required>
+                                            <option value="">Select a stage...</option>
+                                            <option value="Job Development">Job Development</option><option value="Training / OS 1">Training / OS 1</option><option value="Training / OS 2">Training / OS 2</option><option value="Stabilization / ES">Stabilization / ES</option><option value="Work Readiness Training">Work Readiness Training</option><option value="IJP">IJP</option><option value="CWAT">CWAT</option><option value="Job Coaching">Job Coaching</option><option value="Work Evaluation">Work Evaluation</option>
+                                        </select>
+                                    </div>
+                                    <div><label for="vpr-es-name" class="block text-gray-700 font-semibold mb-1">Employment Specialist Name</label><input type="text" id="vpr-es-name" name="EmploymentSpecialistName" value="${state.user.displayName}" class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100" readonly/></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Notes</label><textarea name="Notes" rows="6" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Enter progress notes here..." required></textarea></div>
+                                    <button id="submit-vpr-button" class="w-full mt-6 py-3 px-4 bg-green-700 text-white font-semibold rounded-lg shadow-md hover:bg-green-600 transition duration-300">Submit Report</button>
+                                </form>
+                            </div>
+                        </div>`;
+                    break;
+                case screens.JTSG_VMR_FORM:
+                    content = `
+                        <div class="flex flex-col items-center min-h-screen bg-gray-50 p-4">
+                            <div class="bg-white p-8 rounded-2xl shadow-lg w-full max-w-3xl mt-10">
+                                <h1 class="text-3xl font-bold mb-4 text-center text-green-800">JTSG Vocational Monthly Report</h1>
+                                <form id="jtsgvmr-form" class="space-y-6">
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Month of Service</label><input type="month" name="Month" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required/></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Service Provided</label><input type="text" name="Service" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="e.g., Job Coaching" required/></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Client Name</label><input type="text" name="ClientName" value="${state.reportData.ClientName || ''}" class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100" readonly/></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Employment Specialist Name</label><input type="text" name="ESName" value="${state.reportData.ESName || ''}" class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100" readonly/></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">VR Counselor</label><input type="text" name="Counselor" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Counselor's full name" required/></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Summary Description of Services Rendered</label><textarea name="SummaryofServices" rows="4" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required></textarea></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Participant Response</label><textarea name="Response" rows="4" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required></textarea></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Areas of Concern</label><textarea name="Concern" rows="4" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required></textarea></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Next Steps</label><textarea name="NextSteps" rows="4" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required></textarea></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Date</label><input type="date" name="Date" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required/></div>
+                                </form>
+                                <button id="review-jtsgvmr-button" class="w-full mt-6 py-3 px-4 bg-green-700 text-white font-semibold rounded-lg shadow-md hover:bg-green-600 transition duration-300">Review & Sign</button>
+                            </div>
+                        </div>`;
+                    break;
+                case screens.EVF_FORM:
+                    content = `
+                        <div class="flex flex-col items-center min-h-screen bg-gray-50 p-4">
+                            <div class="bg-white p-8 rounded-2xl shadow-lg w-full max-w-3xl mt-10">
+                                <h1 class="text-3xl font-bold mb-4 text-center text-green-800">Employment Verification Form</h1>
+                                <form id="evf-form" class="space-y-6">
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div><label class="block text-gray-700 font-semibold mb-1">Date</label><input type="date" name="Date" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required/></div>
+                                        <div><label class="block text-gray-700 font-semibold mb-1">Client Name</label><input type="text" name="Name" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required/></div>
+                                        <div><label class="block text-gray-700 font-semibold mb-1">Company Name</label><input type="text" name="CompanyName" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required/></div>
+                                        <div><label class="block text-gray-700 font-semibold mb-1">Company Telephone</label><input type="tel" name="CompanyTelephone" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required/></div>
+                                    </div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Company Address</label><input type="text" name="CompanyAddress" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required/></div>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div><label class="block text-gray-700 font-semibold mb-1">Supervisor Name</label><input type="text" name="SupervisorName" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required/></div>
+                                        <div><label class="block text-gray-700 font-semibold mb-1">VR Counselor Name</label><input type="text" name="VRCounselorName" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required/></div>
+                                        <div><label class="block text-gray-700 font-semibold mb-1">Job Title</label><input type="text" name="JobTitle" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required/></div>
+                                        <div><label class="block text-gray-700 font-semibold mb-1">Salary</label><input type="text" name="Salary" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="e.g., $15/hour" required/></div>
+                                        <div><label class="block text-gray-700 font-semibold mb-1">Date of Hire</label><input type="date" name="DateofHire" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required/></div>
+                                        <div><label class="block text-gray-700 font-semibold mb-1">Start Date</label><input type="date" name="StartDate" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required/></div>
+                                    </div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Job Description</label><textarea name="JobDescription" rows="4" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required></textarea></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Hours per week</label><input type="number" name="Hoursperweek" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required/></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Benefits (if available)</label><input type="text" name="Benefits" class="w-full px-4 py-2 border border-gray-300 rounded-lg" /></div>
+                                    <div class="border border-gray-300 rounded-lg p-4">
+                                        <h3 class="text-lg font-semibold mb-2">Currently employed?</h3>
+                                        <div class="flex space-x-4">
+                                            <label class="flex items-center"><input type="radio" name="Currentlyemployed" value="Yes" class="form-radio text-green-600" required/><span class="ml-2">Yes</span></label>
+                                            <label class="flex items-center"><input type="radio" name="Currentlyemployed" value="No" class="form-radio text-green-600"/><span class="ml-2">No</span></label>
+                                        </div>
+                                    </div>
+                                </form>
+                                <button id="submit-evf-button" class="w-full mt-6 py-3 px-4 bg-green-700 text-white font-semibold rounded-lg shadow-md hover:bg-green-600 transition duration-300">Submit Form</button>
+                            </div>
+                        </div>`;
+                    break;
+                case screens.REPORT_FORM:
+                    content = `
+                        <div class="flex flex-col items-center min-h-screen bg-gray-50 p-4">
+                            <div class="bg-white p-8 rounded-2xl shadow-lg w-full max-w-3xl mt-10">
+                                <h1 class="text-3xl font-bold mb-4 text-center text-green-800">SE Monthly Reports</h1>
+                                 <div class="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg"><p class="text-sm text-gray-700 italic"><strong>Instructions:</strong> This report must be completed in its entirety...</p></div>
+                                <form id="report-form" class="space-y-6">
+                                     <div class="border border-gray-300 rounded-lg p-4"><h3 class="text-lg font-semibold mb-2">Identified Supported Employment Model</h3><div class="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4"><label class="flex items-center"><input type="checkbox" name="model" value="Traditional" class="form-checkbox text-green-600 rounded-md"/><span class="ml-2">Traditional</span></label><label class="flex items-center"><input type="checkbox" name="model" value="IPS" class="form-checkbox text-green-600 rounded-md"/><span class="ml-2">IPS</span></label><label class="flex items-center"><input type="checkbox" name="model" value="Customized Supported Employment" class="form-checkbox text-green-600 rounded-md"/><span class="ml-2">Customized Supported Employment</span></label></div></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Month</label><input type="month" name="month" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required/></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Date Report Submitted</label><input type="date" name="dateReportSubmitted" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required/></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Job Seeker's Name</label><input type="text" name="jobSeekerName" class="w-full px-4 py-2 border border-gray-300 rounded-lg placeholder-gray-400 bg-gray-100" readonly/></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Counselor's Name</label><input type="text" name="counselorName" class="w-full px-4 py-2 border border-gray-300 rounded-lg placeholder-gray-400" placeholder="Full name of the GVRA counselor" required/></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">SE Employment Specialist Name</label><input type="text" name="seSpecialistName" class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100" readonly/></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">SE Provider Name</label><input type="text" name="seProviderName" value="Joshua Tree Service Group" class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100" readonly/></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Job Seeker's Employment Goal</label><input type="text" name="employmentGoal" class="w-full px-4 py-2 border border-gray-300 rounded-lg placeholder-gray-400" placeholder="The client's stated goal for employment" required/></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Date Range Report Covers</label><input type="text" name="dateRangeCovers" class="w-full px-4 py-2 border border-gray-300 rounded-lg placeholder-gray-400" placeholder="e.g., 10/01/2025 - 10/31/2025" required/></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Hours of Job Coaching</label><input type="text" name="hoursOfCoaching" class="w-full px-4 py-2 border border-gray-300 rounded-lg placeholder-gray-400" placeholder="e.g., 15.5" required/></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Medical Considerations</label><p class="text-xs text-gray-500 mb-2 italic">Describe any accommodations...</p><textarea name="medicalConsiderations" rows="4" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required></textarea></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Behavioral Health Considerations</label><p class="text-xs text-gray-500 mb-2 italic">Describe any accommodations...</p><textarea name="behavioralHealthConsiderations" rows="4" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required></textarea></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Sensory</label><p class="text-xs text-gray-500 mb-2 italic">Describe how the job seeker’s needs are being addressed...</p><textarea name="sensory" rows="4" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required></textarea></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Assistive Technology/Accommodations...</label><p class="text-xs text-gray-500 mb-2 italic">Describe the use of AWT...</p><textarea name="assistiveTechnology" rows="4" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required></textarea></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Release of Information/Self-Advocacy</label><p class="text-xs text-gray-500 mb-2 italic">Describe how disclosure has been addressed...</p><textarea name="releaseOfInformation" rows="4" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required></textarea></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Job Development</label><p class="text-xs text-gray-500 mb-2 italic">Describe progress and activities...</p><textarea name="jobDevelopment" rows="4" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required></textarea></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">On-going Supports & follow-up</label><p class="text-xs text-gray-500 mb-2 italic">Indicate what ongoing supports are being provided...</p><textarea name="ongoingSupports" rows="4" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required></textarea></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Potential Barriers</label><p class="text-xs text-gray-500 mb-2 italic">Describe any new or ongoing potential barriers...</p><textarea name="potentialBarriers" rows="4" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required></textarea></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Extended Services</label><p class="text-xs text-gray-500 mb-2 italic">Describe how extended services will be provided...</p><textarea name="extendedServices" rows="4" class="w-full px-4 py-2 border border-gray-300 rounded-lg" required></textarea></div>
+                                </form>
+                                <button id="review-button" class="w-full mt-6 py-3 px-4 bg-green-700 text-white font-semibold rounded-lg shadow-md hover:bg-green-600 transition duration-300">Review & Sign</button>
+                            </div>
+                        </div>`;
+                    break;
+                case screens.JTSG_VMR_REVIEW:
+                    const jtsgvmrOrderedKeys = ['Month', 'Service', 'ClientName', 'ESName', 'Counselor', 'SummaryofServices', 'Response', 'Concern', 'NextSteps', 'Date'];
+                    const jtsgvmrFieldLabels = { Month: 'Month of Service', Service: 'Service Provided', ClientName: 'Client Name', ESName: 'ES Name', Counselor: 'VR Counselor', SummaryofServices: 'Summary of Services', Response: 'Participant Response', Concern: 'Areas of Concern', NextSteps: 'Next Steps', Date: 'Date' };
+                    const jtsgvmrSummaryHtml = jtsgvmrOrderedKeys.map(key => { const value = state.reportData[key]; if (!value) return ''; const label = jtsgvmrFieldLabels[key] || key; return `<dt class="font-semibold text-gray-800">${label}</dt><dd class="text-gray-600">${value}</dd>`; }).join('');
+                    content = `
+                        <div class="flex flex-col items-center min-h-screen bg-gray-50 p-4">
+                            <div class="bg-white p-8 rounded-2xl shadow-lg w-full max-w-3xl mt-10">
+                                <h1 class="text-3xl font-bold mb-4 text-center text-green-800">Final Review and Signature</h1>
+                                <div id="summary-container" class="w-full bg-gray-50 p-6 rounded-lg border border-gray-200 mb-6"><h2 class="text-xl font-bold mb-4 text-gray-800 border-b pb-2">Report Summary</h2><dl class="summary-grid">${jtsgvmrSummaryHtml}</dl></div>
+                                <div class="mt-6 space-y-6">
+                                    <div><label class="block text-gray-700 font-semibold mb-1">ES Typed Name</label><input type="text" id="typedEsName" value="${state.typedEsName}" class="w-full px-4 py-2 border border-gray-300 rounded-lg"/></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">Provider Signature</label><canvas id="signature-pad" class="border border-gray-300 rounded-lg w-full" width="400" height="150"></canvas><button id="clear-signature" class="text-sm text-gray-500 hover:text-red-500 mt-2">Clear Signature</button></div>
+                                </div>
+                                <div class="flex items-center justify-center space-x-4 mt-6">
+                                    <button id="back-to-jtsgvmr-form-button" class="w-1/2 py-3 px-4 bg-gray-500 text-white font-semibold rounded-lg shadow-md hover:bg-gray-400 transition duration-300">Back</button>
+                                    <button id="submit-jtsgvmr-button" class="w-1/2 py-3 px-4 bg-green-700 text-white font-semibold rounded-lg shadow-md hover:bg-green-600 transition duration-300">Submit Report</button>
+                                </div>
+                            </div>
+                        </div>`;
+                    break;
+                case screens.REVIEW_AND_SIGN:
+                    const orderedKeys = [ 'month', 'dateReportSubmitted', 'jobSeekerName', 'counselorName', 'seSpecialistName', 'seProviderName', 'employmentGoal', 'dateRangeCovers', 'hoursOfCoaching', 'model', 'medicalConsiderations', 'behavioralHealthConsiderations', 'sensory', 'assistiveTechnology', 'releaseOfInformation', 'jobDevelopment', 'ongoingSupports', 'potentialBarriers', 'extendedServices' ];
+                    const fieldLabels = { month: 'Month', dateReportSubmitted: 'Date Submitted', jobSeekerName: "Job Seeker's Name", counselorName: "Counselor's Name", seSpecialistName: 'ES Name', seProviderName: 'Provider Name', employmentGoal: 'Employment Goal', dateRangeCovers: 'Date Range', hoursOfCoaching: 'Hours of Coaching', model: 'SE Model', medicalConsiderations: 'Medical Considerations', behavioralHealthConsiderations: 'Behavioral Health', sensory: 'Sensory', assistiveTechnology: 'Assistive Tech', releaseOfInformation: 'ROI/Advocacy', jobDevelopment: 'Job Development', ongoingSupports: 'Ongoing Supports', potentialBarriers: 'Potential Barriers', extendedServices: 'Extended Services' };
+                    const summaryHtml = orderedKeys.map(key => { const value = state.reportData[key]; if (!value) return ''; const label = fieldLabels[key] || key; const displayValue = Array.isArray(value) ? value.join(', ') : value; return `<dt class="font-semibold text-gray-800">${label}</dt><dd class="text-gray-600">${displayValue}</dd>`; }).join('');
+                     content = `
+                        <div class="flex flex-col items-center min-h-screen bg-gray-50 p-4">
+                            <div class="bg-white p-8 rounded-2xl shadow-lg w-full max-w-3xl mt-10">
+                                <h1 class="text-3xl font-bold mb-4 text-center text-green-800">Final Review and Signature</h1>
+                                <div id="summary-container" class="w-full bg-gray-50 p-6 rounded-lg border border-gray-200 mb-6"><h2 class="text-xl font-bold mb-4 text-gray-800 border-b pb-2">Report Summary</h2><dl class="summary-grid">${summaryHtml}</dl></div>
+                                <div class="mt-6 space-y-6">
+                                    <div class="border border-gray-300 rounded-lg p-4"><h3 class="text-lg font-semibold mb-2">ES Certification</h3><div class="text-sm text-gray-700 space-y-2"><p>By signing below, I, the Employment Specialist, certify that:</p><ul class="list-disc ml-6 space-y-1"><li>The above dates, time, and services are accurate;</li><li>I personally provided services recorded on this form...</li><li>I documented the information on the form...</li><li>I signed the report below; and</li><li>I maintain all staff qualifications...</li></ul></div></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">ES Typed Name</label><input type="text" id="typedEsName" value="${state.typedEsName}" class="w-full px-4 py-2 border border-gray-300 rounded-lg"/></div>
+                                    <div><label class="block text-gray-700 font-semibold mb-1">ES Signature</label><canvas id="signature-pad" class="border border-gray-300 rounded-lg w-full" width="400" height="150"></canvas><button id="clear-signature" class="text-sm text-gray-500 hover:text-red-500 mt-2">Clear Signature</button></div>
+                                </div>
+                                <div class="flex items-center justify-center space-x-4 mt-6">
+                                    <button id="back-to-form-button" class="w-1/2 py-3 px-4 bg-gray-500 text-white font-semibold rounded-lg shadow-md hover:bg-gray-400 transition duration-300">Back</button>
+                                    <button id="submit-button" class="w-1/2 py-3 px-4 bg-green-700 text-white font-semibold rounded-lg shadow-md hover:bg-green-600 transition duration-300">Submit Report</button>
+                                </div>
+                            </div>
+                        </div>`;
+                    break;
+                 case screens.SUBMISSION_STATUS:
+                    content = `
+                        <div class="flex flex-col items-center justify-center min-h-screen bg-gray-50 p-4">
+                            <div class="bg-white p-8 rounded-2xl shadow-lg w-full max-w-sm text-center">
+                                <h1 class="text-2xl font-bold mb-4 text-green-800">Submission Status</h1>
+                                <p class="text-lg ${state.message.includes('success') ? 'text-green-600' : 'text-red-600'} font-semibold mb-4">${state.message}</p>
+                                <button id="home-button" class="w-full py-3 px-4 bg-green-700 text-white font-semibold rounded-lg shadow-md hover:bg-green-600 transition duration-300">Go to Home</button>
+                            </div>
+                        </div>`;
+                    break;
+            }
+            root.innerHTML = content;
+        };
+
+        // --- EVENT HANDLERS ---
+        const handleGoogleSignIn = async () => {
+            const provider = new firebase.auth.GoogleAuthProvider();
+            try { await auth.signInWithPopup(provider); } catch (error) {
+                console.error("Sign-in failed:", error);
+                showMessage(`Sign-in failed: ${error.message}`, true);
+            }
+        };
+        const handleSignOut = () => { auth.signOut(); };
+
+        const handleContinueToForm = async () => {
+            state.loading = true; render();
+            const clientId = generateClientId(state.clientName);
+            if (!clientId) { showMessage('Client Name is required.', true); state.loading = false; render(); return; }
+            try {
+                const docRef = db.collection(reportCollectionName).doc(clientId);
+                const docSnap = await docRef.get();
+                if (docSnap.exists) { 
+                    state.reportData = docSnap.data();
+                    if (state.reportData.model && typeof state.reportData.model === 'string') {
+                        state.reportData.model = state.reportData.model.split(',').map(item => item.trim());
+                    }
+                    showMessage("Previous report data loaded.");
+                } else { state.reportData = {}; showMessage("No previous report found for this client."); }
+                state.reportData = { ...state.reportData, jobSeekerName: state.clientName, seSpecialistName: state.esName, seProviderName: 'Joshua Tree Service Group' };
+                state.screen = screens.REPORT_FORM;
+            } catch (e) { console.error('Firestore read error:', e); showMessage('Error recalling data. Please try again.', true);
+            } finally {
+                state.loading = false; render();
+                setTimeout(() => {
+                    const form = document.getElementById('report-form');
+                    if(form) {
+                        Object.keys(state.reportData).forEach(key => {
+                            if(key === 'model' && Array.isArray(state.reportData.model)) {
+                                 form.querySelectorAll(`input[name="model"]`).forEach(cb => { cb.checked = state.reportData.model.includes(cb.value); });
+                            } else if (form.elements[key]) { form.elements[key].value = state.reportData[key] || ''; }
+                        });
+                    }
+                }, 0);
+            }
+        };
+        
+        const handleReview = () => { state.screen = screens.REVIEW_AND_SIGN; state.typedEsName = state.reportData.seSpecialistName; window.scrollTo(0, 0); render(); setupSignaturePad(); };
+        
+        const handleSubmit = async () => {
+            state.loading = true; render(); state.message = '';
+            try {
+                const clientId = generateClientId(state.clientName);
+                const docRef = db.collection(reportCollectionName).doc(clientId);
+                const dataToSave = { ...state.reportData };
+                if(Array.isArray(dataToSave.model)) { dataToSave.model = dataToSave.model.join(', '); }
+                await docRef.set({ ...dataToSave, lastSubmitted: new Date().toISOString() }, { merge: true });
+                const jobPayload = { reportType: 'seMonthly', reportData: JSON.stringify(state.reportData), typedEsName: state.typedEsName, signatureData: state.signatureData, userEmail: state.user.email, createdAt: new Date().toISOString() };
+                await db.collection(jobCollectionName).add(jobPayload);
+                state.message = 'Report submitted! You will receive an email with the final PDF shortly.';
+                showMessage(state.message, false);
+            } catch (e) {
+                console.error("Submission Error:", e);
+                state.message = `An error occurred during submission: ${e.message}`;
+                showMessage(state.message, true);
+            } finally { state.loading = false; state.screen = screens.SUBMISSION_STATUS; render(); }
+        };
+
+        const handleVprSubmit = async () => { 
+            const form = document.getElementById('vpr-form'); 
+            if (!form.checkValidity()) { 
+                showMessage('Please fill out all required fields.', true); 
+                form.reportValidity(); 
+                return; 
+            } 
+            state.loading = true; 
+            render(); 
+            const formData = new FormData(form); 
+            const vprData = Object.fromEntries(formData.entries()); 
+            try { 
+                const processVprReport = functions.httpsCallable('processVprReport'); 
+                const result = await processVprReport({ reportData: vprData }); 
+                state.message = result.data.message || 'Report submitted successfully!'; 
+                showMessage(state.message, false); 
+            } catch (error) { 
+                console.error("VPR Submission Error:", error); 
+                state.message = `An error occurred: ${error.message}`; 
+                showMessage(state.message, true); 
+            } finally { 
+                state.loading = false; 
+                state.screen = screens.SUBMISSION_STATUS; 
+                render(); 
+            } 
+        };
+        
+        const handleJtsgvmrSubmit = async () => {
+            state.loading = true; render(); state.message = '';
+            try {
+                const jobPayload = { reportType: 'jtsgvmr', reportData: JSON.stringify(state.reportData), typedEsName: state.typedEsName, signatureData: state.signatureData, userEmail: state.user.email, createdAt: new Date().toISOString() };
+                await db.collection(jobCollectionName).add(jobPayload);
+                state.message = 'Report submitted! You will receive an email with the final PDF shortly.';
+                showMessage(state.message, false);
+            } catch (e) {
+                console.error("JTSG VMR Submission Error:", e);
+                state.message = `An error occurred during submission: ${e.message}`;
+                showMessage(state.message, true);
+            } finally { state.loading = false; state.screen = screens.SUBMISSION_STATUS; render(); }
+        };
+
+        const handleEvfSubmit = async () => {
+            const form = document.getElementById('evf-form'); if (!form.checkValidity()) { showMessage('Please fill out all required fields.', true); form.reportValidity(); return; }
+            state.loading = true; render(); state.message = '';
+            try {
+                const formData = new FormData(form); const evfData = Object.fromEntries(formData.entries());
+                const jobPayload = { reportType: 'evf', reportData: JSON.stringify(evfData), userEmail: state.user.email, createdAt: new Date().toISOString() };
+                await db.collection(jobCollectionName).add(jobPayload);
+                state.message = 'Form submitted! You will receive an email with the final PDF shortly.';
+                showMessage(state.message, false);
+            } catch (e) {
+                console.error("EVF Submission Error:", e);
+                state.message = `An error occurred during submission: ${e.message}`;
+                showMessage(state.message, true);
+            } finally { state.loading = false; state.screen = screens.SUBMISSION_STATUS; render(); }
+        };
+        
+        const handleJtsgTsvsSubmit = async () => { 
+            showMessage('This feature is currently under maintenance. Please try again later.', true);
+        };
+        
+        const handleAuth = () => { auth.onAuthStateChanged((currentUser) => { if (currentUser && currentUser.email.endsWith('@thejoshuatree.org')) { state.user = currentUser; state.screen = screens.REPORT_SELECTION; } else { state.user = null; state.screen = screens.LOGIN; } render(); }); };
+        
+        const setupEventListeners = () => {
+             document.body.addEventListener('click', async (e) => {
+                if (e.target.id === 'google-sign-in') handleGoogleSignIn();
+                if (e.target.id === 'sign-out') handleSignOut();
+                
+                if (e.target.id === 'next-button') {
+                    const reportType = document.getElementById('reportType').value;
+                    if (!reportType) return;
+                    state.reportType = reportType;
+                    if (reportType === 'seMonthly' || reportType === 'jtsgvmr') { state.screen = screens.BASIC_INFO; state.esName = state.user.displayName; } 
+                    else if (reportType === 'vpr') { state.screen = screens.VPR_FORM; } 
+                    else if (reportType === 'evf') { state.screen = screens.EVF_FORM; }
+                    else if (reportType === 'jtsgtsvs') { state.screen = screens.JTSG_TSVS_FORM; }
+                    render();
+                }
+                
+                if (e.target.id === 'continue-button') {
+                    state.esName = document.getElementById('esName').value; state.clientName = document.getElementById('clientName').value;
+                    if (state.reportType === 'seMonthly') {
+                        handleContinueToForm();
+                    } else if (state.reportType === 'jtsgvmr') {
+                        state.reportData = { ClientName: state.clientName, ESName: state.esName };
+                        state.screen = screens.JTSG_VMR_FORM;
+                        render();
+                        setTimeout(() => {
+                           const form = document.getElementById('jtsgvmr-form');
+                           if(form) {
+                             form.elements['ClientName'].value = state.reportData.ClientName;
+                             form.elements['ESName'].value = state.reportData.ESName;
+                           }
+                        },0);
+                    }
+                }
+
+                if (e.target.id === 'review-button') {
+                    const form = document.getElementById('report-form'); const formData = new FormData(form); const formObject = {};
+                    formData.forEach((val, key) => {
+                        if (form.elements[key]?.type === 'checkbox') { if(form.elements[key].checked){ if (!formObject[key]) formObject[key] = []; formObject[key].push(val); }}
+                        else { formObject[key] = val; }
+                    });
+                    ['model'].forEach(name => { if (!formObject[name]) { formObject[name] = []; } });
+                    state.reportData = {...state.reportData, ...formObject}; handleReview();
+                }
+                if (e.target.id === 'submit-button') { 
+                    state.typedEsName = document.getElementById('typedEsName').value;
+                    if (state.typedEsName && state.signatureData) { handleSubmit(); } else { showMessage('Please type your name and provide a signature.', true); }
+                }
+
+                if (e.target.id === 'submit-vpr-button') { e.preventDefault(); handleVprSubmit(); }
+
+                if (e.target.id === 'review-jtsgvmr-button') {
+                    const form = document.getElementById('jtsgvmr-form');
+                    const formData = new FormData(form);
+                    state.reportData = {...state.reportData, ...Object.fromEntries(formData.entries())};
+                    state.typedEsName = state.reportData.ESName;
+                    state.screen = screens.JTSG_VMR_REVIEW;
+                    window.scrollTo(0, 0); render(); setupSignaturePad();
+                }
+                if (e.target.id === 'submit-jtsgvmr-button') {
+                    state.typedEsName = document.getElementById('typedEsName').value;
+                    if (state.typedEsName && state.signatureData) {
+                        handleJtsgvmrSubmit();
+                    } else {
+                        showMessage('Please type your name and provide a signature.', true);
+                    }
+                }
+                if (e.target.id === 'back-to-jtsgvmr-form-button') {
+                    state.screen = screens.JTSG_VMR_FORM;
+                    render();
+                    setTimeout(() => {
+                        const form = document.getElementById('jtsgvmr-form');
+                        if (form) { Object.keys(state.reportData).forEach(key => { if (form.elements[key]) { form.elements[key].value = state.reportData[key] || ''; } }); }
+                    }, 0);
+                }
+
+                if (e.target.id === 'submit-evf-button') {
+                    e.preventDefault();
+                    handleEvfSubmit();
+                }
+
+                if (e.target.id === 'submit-jtsgtsvs-button') {
+                    e.preventDefault(); 
+                    handleJtsgTsvsSubmit();
+                }
+
+                if (e.target.id === 'clear-signature') {
+                    e.preventDefault(); const canvas = document.getElementById('signature-pad');
+                    if(canvas) { const ctx = canvas.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height); state.signatureData = ''; }
+                }
+                if (e.target.id === 'home-button') { 
+                    state = { user: state.user, screen: screens.REPORT_SELECTION, reportType: '', esName: state.user.displayName, clientName: '', reportData: {}, typedEsName: '', signatureData: '' };
+                    render();
+                }
+                if (e.target.id === 'back-to-form-button') {
+                    state.screen = screens.REPORT_FORM; render();
+                    const form = document.getElementById('report-form');
+                    if(form) { Object.keys(state.reportData).forEach(key => {
+                        if(key === 'model' && Array.isArray(state.reportData.model)) {
+                            form.querySelectorAll(`input[name="model"]`).forEach(cb => { cb.checked = state.reportData.model.includes(cb.value); });
+                        } else if (form.elements[key]) { form.elements[key].value = state.reportData[key] || ''; }
+                    });}
+                }
+            });
+            
+            document.body.addEventListener('change', (e) => {
+                if (e.target.id === 'jtsgtsvs-files') {
+                    const fileInput = e.target;
+                    const fileListDiv = document.getElementById('file-list');
+                    if (fileInput.files.length > 0) {
+                        const fileNames = Array.from(fileInput.files).map(f => `<li>${f.name}</li>`).join('');
+                        fileListDiv.innerHTML = `<p class="font-semibold mb-2">Selected Files:</p><ul class="list-disc pl-5">${fileNames}</ul>`;
+                    } else {
+                        fileListDiv.innerHTML = '';
+                    }
+                }
+            });
+
+            document.body.addEventListener('input', (e) => {
+                 const form = e.target.closest('#report-form');
+                if(form && e.target.name) {
+                    if (e.target.type === 'checkbox') {
+                       if (!state.reportData[e.target.name]) state.reportData[e.target.name] = [];
+                       if (e.target.checked) state.reportData[e.target.name].push(e.target.value);
+                       else state.reportData[e.target.name] = state.reportData[e.target.name].filter(v => v !== e.target.value);
+                    } else state.reportData[e.target.name] = e.target.value;
+                }
+            });
+        };
+
+        const setupSignaturePad = () => { 
+            const canvas = document.getElementById('signature-pad'); 
+            if (!canvas) return; 
+            const ctx = canvas.getContext('2d'); 
+            let drawing = false; 
+            ctx.fillStyle = '#fff'; 
+            ctx.fillRect(0, 0, canvas.width, canvas.height); 
+            const getPosition = (e) => { 
+                e.preventDefault(); 
+                const rect = canvas.getBoundingClientRect(); 
+                return { x: (e.clientX || e.touches[0].clientX) - rect.left, y: (e.clientY || e.touches[0].clientY) - rect.top }; 
+            }; 
+            const startDrawing = (e) => { 
+                drawing = true; 
+                const pos = getPosition(e); 
+                ctx.beginPath(); 
+                ctx.moveTo(pos.x, pos.y); 
+            }; 
+            const draw = (e) => { 
+                if (!drawing) return; 
+                const pos = getPosition(e); 
+                ctx.lineTo(pos.x, pos.y); 
+                ctx.stroke(); 
+            }; 
+            const stopDrawing = () => { 
+                if (drawing) { 
+                    drawing = false; 
+                    state.signatureData = canvas.toDataURL('image/png'); 
+                } 
+            }; 
+            canvas.addEventListener('mousedown', startDrawing); 
+            canvas.addEventListener('mousemove', draw); 
+            canvas.addEventListener('mouseup', stopDrawing); 
+            canvas.addEventListener('mouseleave', stopDrawing); 
+            canvas.addEventListener('touchstart', startDrawing); 
+            canvas.addEventListener('touchmove', draw); 
+            canvas.addEventListener('touchend', stopDrawing); 
+            const clearButton = document.getElementById('clear-signature'); 
+            if(clearButton) { 
+                clearButton.addEventListener('click', (e) => { 
+                    e.preventDefault(); 
+                    ctx.fillStyle = '#fff'; 
+                    ctx.fillRect(0, 0, canvas.width, canvas.height); 
+                    state.signatureData = ''; 
+                }); 
+            } 
+        };
+
+        window.onload = () => {
+            render();
+            handleAuth();
+            setupEventListeners();
+        };
+    </script>
+</body>
+</html>
+

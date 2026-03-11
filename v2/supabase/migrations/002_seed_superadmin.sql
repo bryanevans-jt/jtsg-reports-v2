@@ -1,0 +1,2 @@
+-- Superadmin (bryan.evans@thejoshuatree.org) is seeded in the app on first login
+-- via API route that uses service role to insert into user_roles

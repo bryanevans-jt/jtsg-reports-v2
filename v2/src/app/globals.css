@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --green-800: #166534;
+  --green-700: #15803d;
+}
+
+body {
+  font-family: var(--font-inter), system-ui, sans-serif;
+  background-color: #f9fafb;
+}
