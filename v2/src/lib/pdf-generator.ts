@@ -133,7 +133,7 @@ export async function generateSEMonthlyPdf(
         requestBody: { requests: [{ replaceAllText: { containsText: { text: '{{esSignature}}' }, replaceText: 'Not Signed' } }] },
       });
     }
-    const pdfRes = await drive.files.export({ supportsAllDrives: true, fileId: tempDocId, mimeType: 'application/pdf' }, { responseType: 'arraybuffer' });
+    const pdfRes = await drive.files.export({ supportsAllDrives: true, fileId: tempDocId, mimeType: 'application/pdf' } as { fileId: string; mimeType: string }, { responseType: 'arraybuffer' });
     return Buffer.from(pdfRes.data as ArrayBuffer);
   } finally {
     await drive.files.delete({ supportsAllDrives: true, fileId: tempDocId });
@@ -162,7 +162,7 @@ export async function generateVPRPdf(
       },
     }));
     await docs.documents.batchUpdate({ documentId: tempDocId, requestBody: { requests } });
-    const pdfRes = await drive.files.export({ supportsAllDrives: true, fileId: tempDocId, mimeType: 'application/pdf' }, { responseType: 'arraybuffer' });
+    const pdfRes = await drive.files.export({ supportsAllDrives: true, fileId: tempDocId, mimeType: 'application/pdf' } as { fileId: string; mimeType: string }, { responseType: 'arraybuffer' });
     return Buffer.from(pdfRes.data as ArrayBuffer);
   } finally {
     await drive.files.delete({ supportsAllDrives: true, fileId: tempDocId });
@@ -228,7 +228,7 @@ export async function generateJTSGVMRPdf(
         requestBody: { requests: [{ replaceAllText: { containsText: { text: '{{ProviderSignature}}' }, replaceText: 'Not Signed' } }] },
       });
     }
-    const pdfRes = await drive.files.export({ supportsAllDrives: true, fileId: tempDocId, mimeType: 'application/pdf' }, { responseType: 'arraybuffer' });
+    const pdfRes = await drive.files.export({ supportsAllDrives: true, fileId: tempDocId, mimeType: 'application/pdf' } as { fileId: string; mimeType: string }, { responseType: 'arraybuffer' });
     return Buffer.from(pdfRes.data as ArrayBuffer);
   } finally {
     await drive.files.delete({ supportsAllDrives: true, fileId: tempDocId });
@@ -257,7 +257,7 @@ export async function generateEVFPdf(
       },
     }));
     await docs.documents.batchUpdate({ documentId: tempDocId, requestBody: { requests } });
-    const pdfRes = await drive.files.export({ supportsAllDrives: true, fileId: tempDocId, mimeType: 'application/pdf' }, { responseType: 'arraybuffer' });
+    const pdfRes = await drive.files.export({ supportsAllDrives: true, fileId: tempDocId, mimeType: 'application/pdf' } as { fileId: string; mimeType: string }, { responseType: 'arraybuffer' });
     return Buffer.from(pdfRes.data as ArrayBuffer);
   } finally {
     await drive.files.delete({ supportsAllDrives: true, fileId: tempDocId });
