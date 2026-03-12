@@ -46,8 +46,6 @@ function LoginContent() {
     }
   };
 
-  const currentYear = new Date().getFullYear();
-
   if (!mounted) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -93,9 +91,6 @@ function LoginContent() {
           )}
         </div>
       </div>
-      <footer className="py-4 text-center text-sm text-gray-500">
-        © {currentYear} Joshua Tree Service Group · Version 2.0.4
-      </footer>
     </div>
   );
 }

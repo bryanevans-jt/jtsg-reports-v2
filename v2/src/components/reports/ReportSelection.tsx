@@ -17,7 +17,7 @@ export function ReportSelection({ user, onSelect }: Props) {
     <div className="flex flex-col items-center min-h-screen bg-gray-50 p-4">
       <div className="bg-white p-8 rounded-2xl shadow-lg w-full max-w-lg mt-10">
         <h1 className="text-3xl font-bold mb-4 text-center text-green-800">
-          Joshua Tree Reports v2
+          Joshua Tree Reports
         </h1>
         <p className="text-gray-600 mb-6 text-center">
           Welcome, {user.displayName}! Use this tool to submit client reports.
