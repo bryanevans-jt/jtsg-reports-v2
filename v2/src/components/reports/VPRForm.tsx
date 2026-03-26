@@ -12,6 +12,9 @@ const VPR_SERVICE_STAGE_OPTIONS = [
   { value: 'Job Development', label: 'SE - Job Development' },
   { value: 'Training / OS 1', label: 'SE - Training / OS 1' },
   { value: 'Training / OS 2', label: 'SE - Training / OS 2' },
+  { value: 'IJP', label: 'IJP' },
+  { value: 'Work Readiness Training', label: 'Work Readiness Training' },
+  { value: 'Work Evaluation', label: 'Work Evaluation' },
   { value: 'Job Coaching', label: 'Job Coaching (Service)' },
 ];
 
