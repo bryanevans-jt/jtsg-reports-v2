@@ -1,13 +1,19 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { ALL_VPR_SERVICE_STAGES } from '@/lib/constants';
 
 interface Props {
   user: { email: string; displayName: string };
   onSuccess: (msg: string) => void;
   onError: (msg: string) => void;
 }
+
+const VPR_SERVICE_STAGE_OPTIONS = [
+  { value: 'Job Development', label: 'SE - Job Development' },
+  { value: 'Training / OS 1', label: 'SE - Training / OS 1' },
+  { value: 'Training / OS 2', label: 'SE - Training / OS 2' },
+  { value: 'Job Coaching', label: 'Job Coaching (Service)' },
+];
 
 export function VPRForm({ user, onSuccess, onError }: Props) {
   const formRef = useRef<HTMLFormElement>(null);
@@ -71,8 +77,8 @@ export function VPRForm({ user, onSuccess, onError }: Props) {
               required
             >
               <option value="">Select a stage...</option>
-              {ALL_VPR_SERVICE_STAGES.map((s) => (
-                <option key={s} value={s}>{s}</option>
+              {VPR_SERVICE_STAGE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
           </div>
